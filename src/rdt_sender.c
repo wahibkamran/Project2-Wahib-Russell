@@ -85,6 +85,7 @@ int main (int argc, char **argv)
 {
     int portno, len;
     int next_seqno;
+    int num_dups = 0;
     char *hostname;
     char buffer[DATA_SIZE];
     FILE *fp;
@@ -184,6 +185,7 @@ int main (int argc, char **argv)
         }
 
         if(count > 0){
+            num_dups = 0;
             stop_timer();
              
             for(int i = 0; i < 10-count; i++){
@@ -217,6 +219,13 @@ int main (int argc, char **argv)
             }
             
             start_timer(); 
+        } else {
+            num_dups++;
+            if(num_dups >= 3){
+                stop_timer();
+                resend_packets(SIGALRM);
+                start_timer();
+            }
         }
 
         if(sndpkt[0] == NULL){

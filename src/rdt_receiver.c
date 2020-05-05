@@ -21,6 +21,8 @@
  */
 tcp_packet *recvpkt;
 tcp_packet *sndpkt;
+tcp_packet *recv_buffer[64];
+int buff_i = 0;
 
 int main(int argc, char **argv) {
     int sockfd; /* socket */
@@ -80,6 +82,11 @@ int main(int argc, char **argv) {
 
     clientlen = sizeof(clientaddr);
     int wanted_seq_no = 0;
+
+    for(int i = 0; i < 64; i++){
+        recv_buffer[i] = NULL;
+    }
+
     while (1) {
         /*
          * recvfrom: receive a UDP datagram from a client
@@ -110,8 +117,27 @@ int main(int argc, char **argv) {
             fseek(fp, recvpkt->hdr.seqno, SEEK_SET);
             fwrite(recvpkt->data, 1, recvpkt->hdr.data_size, fp);
             wanted_seq_no = sndpkt->hdr.ackno;
+
+            for (int i = 0; i < buff_i; i++){
+                if(recv_buffer[i]->hdr.seqno == wanted_seq_no){
+                    sndpkt->hdr.ackno = recv_buffer[i]->hdr.seqno + recv_buffer[i]->hdr.data_size;
+                    fseek(fp, recv_buffer[i]->hdr.seqno, SEEK_SET);
+                    fwrite(recv_buffer[i]->data, 1, recv_buffer[i]->hdr.data_size, fp);
+                    wanted_seq_no = sndpkt->hdr.ackno;
+
+                    for (int j = i; j < buff_i; j++){
+                        recv_buffer[j] = recv_buffer[j+1];
+                    }
+                    
+                    i--;
+                }
+            }      
         } else {
             sndpkt->hdr.ackno = wanted_seq_no;
+            if(buff_i < 64){
+                recv_buffer[buff_i] = recvpkt;
+                buff_i++;
+            }  
         }
         sndpkt->hdr.ctr_flags = ACK;
 

@@ -148,18 +148,22 @@ int main (int argc, char **argv)
     send_base = sndpkt[0]->hdr.seqno;
 
     for (int i = 0; i < 10; i++){
+
         if(sndpkt[i] != NULL){
             if(sendto(sockfd, sndpkt[i], TCP_HDR_SIZE + get_data_size(sndpkt[i]), 0, 
                     ( const struct sockaddr *)&serveraddr, serverlen) < 0)
             {
                 error("sendto");
             }
+            if(i==0){
+                start_timer();
+            }
+
         } else {
             break;
         }
     }
 
-    start_timer();
 
     while(1){
         if(recvfrom(sockfd, buffer, MSS_SIZE, 0,
@@ -205,7 +209,7 @@ int main (int argc, char **argv)
                     next_seqno = curr_seq+len;
                 }
             }
-
+            int next=count;
             for (int i = 10-count; i < 10; i++){
                 if(sndpkt[i] != NULL){
                     if(sendto(sockfd, sndpkt[i], TCP_HDR_SIZE + get_data_size(sndpkt[i]), 0, 
@@ -213,12 +217,13 @@ int main (int argc, char **argv)
                     {
                         error("sendto");
                     }
+                    if(i==10-next){
+                        start_timer(); 
+                    }
                 } else {
                     break;
                 }
             }
-            
-            start_timer(); 
         } else {
             num_dups++;
             if(num_dups >= 3){

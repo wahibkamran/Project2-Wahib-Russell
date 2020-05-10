@@ -10,6 +10,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include <assert.h>
+#include<math.h>
 
 #include"packet.h"
 #include"common.h"
@@ -17,9 +18,18 @@
 #define STDIN_FD    0
 #define RETRY  120 //milli second 
 
+ #define max(a,b) \
+   ({ __typeof__ (a) _a = (a); \
+       __typeof__ (b) _b = (b); \
+     _a > _b ? _a : _b; })
+
 int next_seqno=0;
 int send_base=0;
-int window_size = 1;
+float window_size = 1;
+int ss_thresh = 64;
+int mode = 0; //0 = slow start, 1 = congestion avoidance
+int start_wnd = 0;
+int end_wnd = 0;
 
 int sockfd, serverlen;
 struct sockaddr_in serveraddr;
@@ -36,7 +46,12 @@ void resend_packets(int sig)
         //Resend all packets range between 
         //sendBase and nextSeqNum
         // VLOG(INFO, "Timeout happened");
-        for (int i = 0; i < 10; i++){
+        mode = 0;
+        window_size = 1;
+        end_wnd = start_wnd;
+        ss_thresh = max(floor(window_size/2), 2);
+
+        for (int i = start_wnd; i < end_wnd; i++){
             if(sndpkt[i] != NULL){
                 if(sendto(sockfd, sndpkt[i], TCP_HDR_SIZE + get_data_size(sndpkt[i]), 0, 
                         ( const struct sockaddr *)&serveraddr, serverlen) < 0)

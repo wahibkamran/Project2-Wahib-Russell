@@ -20,11 +20,13 @@
 int next_seqno=0;
 int send_base=0;
 int window_size = 1;
+int start_wnd=0;
+int end_wnd=0;
 
 int sockfd, serverlen;
 struct sockaddr_in serveraddr;
 struct itimerval timer; 
-tcp_packet *sndpkt[10];
+tcp_packet *sndpkt[1024];
 tcp_packet *recvpkt;
 sigset_t sigmask;       
 
@@ -129,12 +131,12 @@ int main (int argc, char **argv)
     init_timer(RETRY, resend_packets);
     next_seqno = 0;
 
-    for(int i = 0; i < 10; i++){
+    for(int i = 0; i < 1024; i++){
         sndpkt[i] = NULL;
     }
 
     int curr_seq = send_base;
-    for(int i = 0; i < 10; i++){
+    for(int i = 0; i < 1024; i++){
         len = fread(buffer, 1, DATA_SIZE, fp);
         if ( len > 0){
             curr_seq = next_seqno;
@@ -147,13 +149,15 @@ int main (int argc, char **argv)
     
     send_base = sndpkt[0]->hdr.seqno;
 
-    for (int i = 0; i < 10; i++){
+    for (int i = 0; i < window_size; i++){
 
         if(sndpkt[i] != NULL){
             if(sendto(sockfd, sndpkt[i], TCP_HDR_SIZE + get_data_size(sndpkt[i]), 0, 
                     ( const struct sockaddr *)&serveraddr, serverlen) < 0)
             {
                 error("sendto");
+            }else{
+                end_wnd=i;
             }
             if(i==0){
                 start_timer();
@@ -176,9 +180,10 @@ int main (int argc, char **argv)
         assert(get_data_size(recvpkt) <= DATA_SIZE);
 
         int count = 0;
-        for(int i = 0; i < 10; i++){
-            if(sndpkt[i] != NULL){
+        for(int i = 0; i < window_size; i++){
+            if(sndpkt[(i+start_wnd)%1024] != NULL){
                 if(recvpkt->hdr.ackno > sndpkt[i]->hdr.seqno){
+                    
                     count++;
                 } else {
                     break;
@@ -191,39 +196,67 @@ int main (int argc, char **argv)
         if(count > 0){
             num_dups = 0;
             stop_timer();
-             
-            for(int i = 0; i < 10-count; i++){
-                sndpkt[i] = sndpkt[i+count];
-            }
-            send_base = recvpkt->hdr.ackno;
+            
+            int temp=end_wnd;
+            int temp2=start_wnd; 
+            start_wnd+=count;
+            end_wnd = start_wnd + floor(window_size) - 1;
 
-            curr_seq = send_base;
-            for(int i = 10-count; i < 10; i++){
-                sndpkt[i] = NULL;
-                len = fread(buffer, 1, DATA_SIZE, fp);
-                if ( len > 0){
-                    curr_seq = next_seqno;
-                    sndpkt[i] = make_packet(len);
-                    memcpy(sndpkt[i]->data, buffer, len);
-                    sndpkt[i]->hdr.seqno = curr_seq;
-                    next_seqno = curr_seq+len;
+            int diff = end_wnd-temp
+
+            if(end_wnd>=1024){
+                for(int i = 0; i < start_wnd; i++){
+                    len = fread(buffer, 1, DATA_SIZE, fp);
+                    if ( len > 0){
+                        curr_seq = next_seqno;
+                        next_seqno = curr_seq+len;
+                        sndpkt[i] = make_packet(len);
+                        memcpy(sndpkt[i]->data, buffer, len);
+                        sndpkt[i]->hdr.seqno = curr_seq;
+                    } else{
+                        sndpkt[i]=NULL;
+                    }
                 }
             }
-            int next=count;
-            for (int i = 10-count; i < 10; i++){
-                if(sndpkt[i] != NULL){
-                    if(sendto(sockfd, sndpkt[i], TCP_HDR_SIZE + get_data_size(sndpkt[i]), 0, 
+
+            if(start_wnd>=1024){
+                for(int i = temp2; i < 1024; i++){
+                    len = fread(buffer, 1, DATA_SIZE, fp);
+                    if ( len > 0){
+                        curr_seq = next_seqno;
+                        next_seqno = curr_seq+len;
+                        sndpkt[i] = make_packet(len);
+                        memcpy(sndpkt[i]->data, buffer, len);
+                        sndpkt[i]->hdr.seqno = curr_seq;
+                    } else{
+                        sndpkt[i]=NULL;
+                    }
+                }
+            }
+
+            start_wnd%=1024;
+            end_wnd%=1024;
+
+            send_base = recvpkt->hdr.ackno;
+            int index;
+            curr_seq = send_base;
+            for(int i = 1; i <= diff; i++){
+                index=(i+temp)%1024;
+           
+                if(sndpkt[index] != NULL){
+                    if(sendto(sockfd, sndpkt[index], TCP_HDR_SIZE + get_data_size(sndpkt[index]), 0, 
                             ( const struct sockaddr *)&serveraddr, serverlen) < 0)
                     {
                         error("sendto");
                     }
-                    if(i==10-next){
+                    if(index==(temp+1)%1024){
                         start_timer(); 
                     }
                 } else {
                     break;
                 }
             }
+
         } else {
             num_dups++;
             if(num_dups >= 3){
@@ -233,7 +266,7 @@ int main (int argc, char **argv)
             }
         }
 
-        if(sndpkt[0] == NULL){
+        if(sndpkt[start_wnd] == NULL ){
             printf("File sent, closing connection\n");        
             sndpkt[0] = make_packet(0);
             sendto(sockfd, sndpkt[0], TCP_HDR_SIZE,  0,
@@ -243,7 +276,7 @@ int main (int argc, char **argv)
         }
     }
     
-    for (int i = 0; i < 10; i++){
+    for (int i = 0; i < 1024; i++){
         if(sndpkt[i] != NULL){
             free(sndpkt[i]);
         }
@@ -260,6 +293,3 @@ int main (int argc, char **argv)
     //  restart timer
     //if timeout resend everything in array
 }
-
-
-

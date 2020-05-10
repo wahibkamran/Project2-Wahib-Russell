@@ -209,13 +209,23 @@ int main (int argc, char **argv)
         if(count > 0){
             num_dups = 0;
             stop_timer();
+
+            //if slow start
+            if(mode == 0){
+                window_size += count;
+                if(window_size >= ss_thresh){
+                    mode = 1; //set to congestion avoidance
+                }
+            } else if(mode == 1) { //else if congestion avoidance
+                window_size += ((float)count/window_size);
+            }
             
             int temp=end_wnd;
             int temp2=start_wnd; 
             start_wnd+=count;
             end_wnd = start_wnd + floor(window_size) - 1;
 
-            int diff = end_wnd-temp
+            int diff = end_wnd-temp;
 
             if(end_wnd>=1024){
                 for(int i = 0; i < start_wnd; i++){

@@ -16,12 +16,9 @@
 #include"common.h"
 
 #define STDIN_FD    0
-#define RETRY  120 //milli second 
+#define RETRY  240 //milli second 
 
- #define max(a,b) \
-   ({ __typeof__ (a) _a = (a); \
-       __typeof__ (b) _b = (b); \
-     _a > _b ? _a : _b; })
+
 
 int next_seqno=0;
 int send_base=0;
@@ -37,8 +34,15 @@ struct sockaddr_in serveraddr;
 struct itimerval timer; 
 tcp_packet *sndpkt[1024];
 tcp_packet *recvpkt;
-sigset_t sigmask;       
+sigset_t sigmask;      
 
+int max(int a, int b){
+    if(a > b){
+        return a;
+    } else {
+        return b;
+    }
+}
 
 void resend_packets(int sig)
 {
@@ -47,13 +51,13 @@ void resend_packets(int sig)
         //Resend all packets range between 
         //sendBase and nextSeqNum
         // VLOG(INFO, "Timeout happened");
-        mode = 0;
-        window_size = 1;
-        end_wnd = start_wnd;
         if(waiting == 0){
             ss_thresh = max(floor(window_size/2), 2);
             // printf("setting ssthresh to %i", ss_thresh);
         }
+        mode = 0;
+        window_size = 1;
+        end_wnd = start_wnd;
 
         for(int i = 0; i < window_size; i++){
             int ind = (i+start_wnd)%1024;
@@ -196,7 +200,7 @@ int main (int argc, char **argv)
         }
     }
 
-    fprintf(csv, "pkt_seq_no,window_size\n%i,%.2f\n", 0, window_size);
+    fprintf(csv, "pkt_seq_no,window_size,ss_thresh\n%i,%.2f,%i\n", 0, window_size, ss_thresh);
 
     while(1){
         if(recvfrom(sockfd, buffer, MSS_SIZE, 0,
@@ -244,7 +248,7 @@ int main (int argc, char **argv)
             start_wnd+=count;
             end_wnd = (start_wnd + floor(window_size) - 1);
 
-            fprintf(csv, "%i,%.2f\n", recvpkt->hdr.ackno, window_size);
+            fprintf(csv, "%i,%.2f,%i\n", recvpkt->hdr.ackno, window_size,ss_thresh);
 
             start_wnd%=1024;
             end_wnd%=1024;

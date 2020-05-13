@@ -26,7 +26,6 @@ int buff_i = 0;
 
 int main(int argc, char **argv) {
     int sockfd; /* socket */
-    char *hostname;
     int portno; /* port to listen on */
     int clientlen; /* byte size of client's address */
     struct sockaddr_in serveraddr; /* server's addr */
@@ -39,17 +38,16 @@ int main(int argc, char **argv) {
     /* 
      * check command line arguments 
      */
-    if (argc != 4) {
+    if (argc != 3) {
         fprintf(stderr, "usage: %s <addr> <port> FILE_RECVD\n", argv[0]);
         exit(1);
     }
 
-    hostname = argv[1];
-    portno = atoi(argv[2]);
+    portno = atoi(argv[1]);
 
-    fp  = fopen(argv[3], "w");
+    fp  = fopen(argv[2], "w");
     if (fp == NULL) {
-        error(argv[3]);
+        error(argv[2]);
     }
 
     /* 
@@ -74,10 +72,7 @@ int main(int argc, char **argv) {
     bzero((char *) &serveraddr, sizeof(serveraddr));
     serveraddr.sin_family = AF_INET;
 
-    if (inet_aton(hostname, &serveraddr.sin_addr) == 0) {
-        fprintf(stderr,"ERROR, invalid host %s\n", hostname);
-        exit(0);
-    }
+    serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
     
     serveraddr.sin_port = htons((unsigned short)portno);
 

@@ -21,17 +21,17 @@ CLIENT := $(OBJDIR)/rdt_sender
 SERVER := $(OBJDIR)/rdt_receiver
 
 rm       = rm -f
-rmdir    = rmdir 
+rmdir    = rmdir
 
 TARGET:	$(OBJDIR) $(CLIENT)	$(SERVER)
 
 
 $(CLIENT):	$(CLIENT_OBJECTS)
-	$(LINKER)  $@  $(CLIENT_OBJECTS)
+	$(LINKER)  $@  $(CLIENT_OBJECTS) -lm
 	@echo "Link complete!"
 
 $(SERVER): $(SERVER_OBJECTS)
-	$(LINKER)  $@  $(SERVER_OBJECTS)
+	$(LINKER)  $@  $(SERVER_OBJECTS) -lm
 	@echo "Link complete!"
 
 $(OBJDIR)/%.o:	%.c common.h packet.h

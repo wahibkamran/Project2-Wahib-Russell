@@ -30,6 +30,7 @@ int ss_thresh = 64;
 int mode = 0; //0 = slow start, 1 = congestion avoidance
 int start_wnd = 0;
 int end_wnd = 0;
+int waiting = 1;
 
 int sockfd, serverlen;
 struct sockaddr_in serveraddr;
@@ -49,15 +50,21 @@ void resend_packets(int sig)
         mode = 0;
         window_size = 1;
         end_wnd = start_wnd;
-        ss_thresh = max(floor(window_size/2), 2);
+        if(waiting == 0){
+            ss_thresh = max(floor(window_size/2), 2);
+            // printf("setting ssthresh to %i", ss_thresh);
+        }
 
-        for (int i = start_wnd; i < end_wnd; i++){
-            if(sndpkt[i] != NULL){
-                if(sendto(sockfd, sndpkt[i], TCP_HDR_SIZE + get_data_size(sndpkt[i]), 0, 
+        for(int i = 0; i < window_size; i++){
+            int ind = (i+start_wnd)%1024;
+            // printf("Sending packet at %i\n", ind);
+            if(sndpkt[ind] != NULL){
+                if(sendto(sockfd, sndpkt[ind], TCP_HDR_SIZE + get_data_size(sndpkt[ind]), 0, 
                         ( const struct sockaddr *)&serveraddr, serverlen) < 0)
                 {
                     error("sendto");
                 }
+                // printf("Sent packet at %i with seq no %i\n", ind, sndpkt[ind]->hdr.seqno);
             } else {
                 break;
             }
@@ -103,7 +110,7 @@ int main (int argc, char **argv)
     int num_dups = 0;
     char *hostname;
     char buffer[DATA_SIZE];
-    FILE *fp;
+    FILE *fp, *csv;
 
     /* check command line arguments */
     if (argc != 4) {
@@ -116,6 +123,8 @@ int main (int argc, char **argv)
     if (fp == NULL) {
         error(argv[3]);
     }
+
+    csv = fopen("window_sizes.csv", "w");
 
     /* socket: create the socket */
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -149,6 +158,7 @@ int main (int argc, char **argv)
     }
 
     int curr_seq = send_base;
+    int np = 0;
     for(int i = 0; i < 1024; i++){
         len = fread(buffer, 1, DATA_SIZE, fp);
         if ( len > 0){
@@ -157,8 +167,13 @@ int main (int argc, char **argv)
             sndpkt[i] = make_packet(len);
             memcpy(sndpkt[i]->data, buffer, len);
             sndpkt[i]->hdr.seqno = curr_seq;
-        }  
+            np++;
+        }  else {
+            break;
+        }
     }
+
+    printf("%i\n", next_seqno);
     
     send_base = sndpkt[0]->hdr.seqno;
 
@@ -181,6 +196,7 @@ int main (int argc, char **argv)
         }
     }
 
+    fprintf(csv, "pkt_seq_no,window_size\n%i,%.2f\n", 0, window_size);
 
     while(1){
         if(recvfrom(sockfd, buffer, MSS_SIZE, 0,
@@ -189,14 +205,15 @@ int main (int argc, char **argv)
             error("recvfrom");
         }
 
+        
         recvpkt = (tcp_packet *)buffer;
         assert(get_data_size(recvpkt) <= DATA_SIZE);
 
         int count = 0;
         for(int i = 0; i < window_size; i++){
             if(sndpkt[(i+start_wnd)%1024] != NULL){
-                if(recvpkt->hdr.ackno > sndpkt[i]->hdr.seqno){
-                    
+                // printf("ack recv: %i curr pkt seq no: %i\n", recvpkt->hdr.ackno, sndpkt[(i+start_wnd)%1024]->hdr.seqno);
+                if(recvpkt->hdr.ackno > sndpkt[(i+start_wnd)%1024]->hdr.seqno){
                     count++;
                 } else {
                     break;
@@ -209,6 +226,7 @@ int main (int argc, char **argv)
         if(count > 0){
             num_dups = 0;
             stop_timer();
+            waiting = 0;
 
             //if slow start
             if(mode == 0){
@@ -219,53 +237,47 @@ int main (int argc, char **argv)
             } else if(mode == 1) { //else if congestion avoidance
                 window_size += ((float)count/window_size);
             }
-            
+         
             int temp=end_wnd;
             int temp2=start_wnd; 
+
             start_wnd+=count;
-            end_wnd = start_wnd + floor(window_size) - 1;
+            end_wnd = (start_wnd + floor(window_size) - 1);
 
-            int diff = end_wnd-temp;
-
-            if(end_wnd>=1024){
-                for(int i = 0; i < start_wnd; i++){
-                    len = fread(buffer, 1, DATA_SIZE, fp);
-                    if ( len > 0){
-                        curr_seq = next_seqno;
-                        next_seqno = curr_seq+len;
-                        sndpkt[i] = make_packet(len);
-                        memcpy(sndpkt[i]->data, buffer, len);
-                        sndpkt[i]->hdr.seqno = curr_seq;
-                    } else{
-                        sndpkt[i]=NULL;
-                    }
-                }
-            }
-
-            if(start_wnd>=1024){
-                for(int i = temp2; i < 1024; i++){
-                    len = fread(buffer, 1, DATA_SIZE, fp);
-                    if ( len > 0){
-                        curr_seq = next_seqno;
-                        next_seqno = curr_seq+len;
-                        sndpkt[i] = make_packet(len);
-                        memcpy(sndpkt[i]->data, buffer, len);
-                        sndpkt[i]->hdr.seqno = curr_seq;
-                    } else{
-                        sndpkt[i]=NULL;
-                    }
-                }
-            }
+            fprintf(csv, "%i,%.2f\n", recvpkt->hdr.ackno, window_size);
 
             start_wnd%=1024;
             end_wnd%=1024;
 
+            int diff = (end_wnd%1024)-temp;
+            if(diff < 0){
+                diff += 1024;
+            }
+
+            for(int i = 0; i < count; i++){
+                len = fread(buffer, 1, DATA_SIZE, fp);
+                int index=(i+temp2)%1024;
+                if ( len > 0){
+                    curr_seq = next_seqno;
+                    next_seqno = curr_seq+len;
+                    sndpkt[index] = make_packet(len);
+                    memcpy(sndpkt[index]->data, buffer, len);
+                    sndpkt[index]->hdr.seqno = curr_seq;
+                    // printf("packet at %i has seq no %i\n", i, sndpkt[i]->hdr.seqno);
+                } else{
+                    sndpkt[index]=NULL;
+                }
+            }
+
+            // printf("curr window size: %.2f\n", window_size);
+
             send_base = recvpkt->hdr.ackno;
             int index;
             curr_seq = send_base;
+            // printf("*************************\nSending %i new packets\n", diff);
             for(int i = 1; i <= diff; i++){
                 index=(i+temp)%1024;
-           
+                // printf("Sending packet at %i\n", index);
                 if(sndpkt[index] != NULL){
                     if(sendto(sockfd, sndpkt[index], TCP_HDR_SIZE + get_data_size(sndpkt[index]), 0, 
                             ( const struct sockaddr *)&serveraddr, serverlen) < 0)
@@ -278,7 +290,9 @@ int main (int argc, char **argv)
                 } else {
                     break;
                 }
+                // printf("Sent packet at %i with seq no %i\n", index, sndpkt[index]->hdr.seqno);
             }
+            // printf("Sent %i new packets\n*****************\n\n", diff);
 
         } else {
             num_dups++;
@@ -290,6 +304,7 @@ int main (int argc, char **argv)
         }
 
         if(sndpkt[start_wnd] == NULL ){
+
             printf("File sent, closing connection\n");        
             sndpkt[0] = make_packet(0);
             sendto(sockfd, sndpkt[0], TCP_HDR_SIZE,  0,
@@ -304,15 +319,9 @@ int main (int argc, char **argv)
             free(sndpkt[i]);
         }
     }
+
+    fclose(csv);
+    fclose(fp);
     
     return 0;
-
-    //send all pkts in array xx
-    //start timer xx
-    //wait
-    //if received and seq. no. is in array:
-    //  remove all pkts up to the ACK we just got
-    //  read from file and add the num we removed to the end of the array and send those
-    //  restart timer
-    //if timeout resend everything in array
 }

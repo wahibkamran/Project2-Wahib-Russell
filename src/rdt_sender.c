@@ -35,6 +35,9 @@ struct itimerval timer;
 tcp_packet *sndpkt[1024];
 tcp_packet *recvpkt;
 sigset_t sigmask;      
+FILE *csv;
+struct timeval tp;
+double start_time = -1;
 
 int max(int a, int b){
     if(a > b){
@@ -53,7 +56,9 @@ void resend_packets(int sig)
         // VLOG(INFO, "Timeout happened");
         if(waiting == 0){
             ss_thresh = max(floor(window_size/2), 2);
-            // printf("setting ssthresh to %i", ss_thresh);
+            gettimeofday(&tp, NULL);
+            double curr_time = tp.tv_sec + (1.0/1000000) * tp.tv_usec;
+            fprintf(csv, "%.5f,%.2f,%i\n", curr_time-start_time, 1.0, ss_thresh);
         }
         mode = 0;
         window_size = 1;
@@ -114,7 +119,7 @@ int main (int argc, char **argv)
     int num_dups = 0;
     char *hostname;
     char buffer[DATA_SIZE];
-    FILE *fp, *csv;
+    FILE *fp;
 
     /* check command line arguments */
     if (argc != 4) {
@@ -128,7 +133,7 @@ int main (int argc, char **argv)
         error(argv[3]);
     }
 
-    csv = fopen("window_sizes.csv", "w");
+    csv = fopen("CWND.csv", "w");
 
     /* socket: create the socket */
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -176,8 +181,6 @@ int main (int argc, char **argv)
             break;
         }
     }
-
-    printf("%i\n", next_seqno);
     
     send_base = sndpkt[0]->hdr.seqno;
 
@@ -199,8 +202,6 @@ int main (int argc, char **argv)
             break;
         }
     }
-
-    fprintf(csv, "pkt_seq_no,window_size,ss_thresh\n%i,%.2f,%i\n", 0, window_size, ss_thresh);
 
     while(1){
         if(recvfrom(sockfd, buffer, MSS_SIZE, 0,
@@ -232,14 +233,26 @@ int main (int argc, char **argv)
             stop_timer();
             waiting = 0;
 
+            if(start_time < 0){
+                gettimeofday(&tp, NULL);
+                start_time = tp.tv_sec + (1.0/1000000) * tp.tv_usec;
+                fprintf(csv, "time,window_size,ss_thresh\n%i,%.2f,%i\n", 0, window_size, ss_thresh);
+            }
+
             //if slow start
+            gettimeofday(&tp, NULL);
+            double curr_time = tp.tv_sec + (1.0/1000000) * tp.tv_usec;
             if(mode == 0){
                 window_size += count;
+                
+                fprintf(csv, "%.5f,%.2f,%i\n", curr_time-start_time, window_size, ss_thresh);
                 if(window_size >= ss_thresh){
                     mode = 1; //set to congestion avoidance
                 }
             } else if(mode == 1) { //else if congestion avoidance
                 window_size += ((float)count/window_size);
+                gettimeofday(&tp, NULL);
+                fprintf(csv, "%.5f,%.2f,%i\n", curr_time-start_time, window_size, ss_thresh);
             }
          
             int temp=end_wnd;
@@ -248,7 +261,7 @@ int main (int argc, char **argv)
             start_wnd+=count;
             end_wnd = (start_wnd + floor(window_size) - 1);
 
-            fprintf(csv, "%i,%.2f,%i\n", recvpkt->hdr.ackno, window_size,ss_thresh);
+            
 
             start_wnd%=1024;
             end_wnd%=1024;

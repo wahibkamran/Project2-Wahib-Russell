@@ -1,19 +1,35 @@
 import matplotlib.pyplot as plt
 
 x = []
-y = []
+y1 = []
+y2 = []
 
 with open("../obj/CWND.csv", "r") as fp:
     fp.readline()
     for line in fp:
         data = line.strip().split(",")
         x.append(float(data[0]))
-        y.append(float(data[1]))
+        y1.append(float(data[1]))
+        y2.append(int(data[2]))
 
-plt.plot(x, y)
-plt.xlabel("Time (seconds)")
-plt.ylabel("Window Size")
-plt.title("Congestion Window Over Time")
+fig, ax1 = plt.subplots()
+ax2 = ax1.twinx()
+
+# plot first set of data
+ax1.plot(x, y1, "g-")
+ax1.set_ylim([0, max(y1)])
+
+# plot second set of data
+ax2.plot(x, y2, "r--")
+ax2.set_ylim([0, max(y1)])
+
+ax1.set_ylabel("Window Size (num. packets)")
+ax1.set_xlabel("Time (seconds)")
+ax2.set_ylabel("ss_thresh (num. packets)")
+
+    # set colours for each y-axis to tell them apart
+ax1.yaxis.label.set_color("g")
+ax2.yaxis.label.set_color("r")
 plt.show()
 # plt.savefig("../graphs/cwnd.pdf")
 
